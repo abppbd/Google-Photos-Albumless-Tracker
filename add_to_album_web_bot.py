@@ -13,6 +13,8 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
 
 
+
+
 #----------------------------------------------- LANCH THE CHROME DRIVER ---- #
 def driver_init():
     # Initiate the driver.
@@ -24,6 +26,7 @@ def driver_init():
 
     options.add_argument("--disable-blink-features=AutomationControlled")
     # ^^ This ligne, single handedly, allows google photo log in :) ^^
+    # (It doesn't throw the "not secure drowser, can't login" waning)
     
     #options.add_experimental_option("useAutomationExtension", False)
     #options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -32,6 +35,72 @@ def driver_init():
     #driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
     return driver
+
+# --------------------------------- MAKE USER LOGIN AND SELECT THE ALBUM ---- #
+def goto_albums(driver):
+    # Make the user login & select or create an album.
+    # Get the album url from the link.
+
+    driver.get("https://photos.google.com/albums")
+    # Ask the albums page
+
+    while "photos.google.com/albums" not in driver.current_url:
+        # While the user hasn't signed in, the url domain will be:
+        # "accounts.google.com", then the user will be reddirected.
+
+        sleep(0.2)
+        # Wait for the redirect.
+
+    return True
+
+# ----------------------------------------------------- GET THE ALBUM ID ---- #
+def goto_albums(driver):
+    # Find the ID of an album by parsing the url.
+
+    url = driver.current_url()
+
+    if "photos.google.com/album/" in url:
+        album_id = url.replace("https://photos.google.com/album/", "")
+        # Only keep the album ID:
+        # https://photos.google.com/album/TheAlbumIDHere
+
+        album_id = album_id.replace("/", "")
+        # Remove the eventual final "/".
+
+        return (True, album)
+
+    # An album wasn't selected
+    return (False, "The url doesn't point to an album, couldn't retrive the album ID")
+
+# ------------------------------------------ CHECK FOR GOOGLE PHOTOS URL ---- #
+def check_url(url):
+    # Check is it's a google photos url.
+    
+    if "https://photos.google.com" not in url:
+        # The links isn't for google photos.
+        return "The web bot was given a non google photos url:\n" + url
+
+    return True
+
+# ------------------------------------------------------- GET URL ERRORS ---- #
+def get_page_error(driver):
+    # Check if there is a problem with the web page.
+
+    head_title_xpath = "/html/head/title"
+    head_title_elem = driver.find_element(By.XPATH, head_title_xpath)
+    head_title = head_title_elem.get_attribute("innerHTML").loxer()
+    # Retrive webpage title.
+
+    if "error 404" in head_title:
+        # Bad url.
+        return "The 404 error for the requested page:\n" + driver.current_url
+
+    if "can’t access photo" in head_title:
+        # Wrong account.
+        return "You are not logged in with the correct account, couldn't access the requested page:\n" + driver.current_url
+
+    # Every thing went well.
+    return True
 
 #----------------------------------------------- OPEN ADD TOO ALBUM MENU ---- #
 def open_album_menu(driver):
@@ -63,102 +132,91 @@ def open_album_menu(driver):
         # Find and click the "add to album" button.
 
     except NoSuchElementException:
-        return "The \"more options\" menu couldn't be opened."
+        return "The \"Ad to album\" menu couldn't be opened."
 
     # Every thing went well.
     return True
 
-#-------------------------------------------- MAKE USER SELECT THE ALBUM ---- #
-def album_init(driver, media_url):
-    # Make the user login & select or create an album.
 
-    media_url = media_url[:-1] if media_url[-1] == "/" else media_url
-    # Allow redirect (for login) by removing the last "/" in the url.
 
-    driver.get(media_url)
-    # Open media page, redirected to google photo login.
-
-    while "photos.google.com/photo/" not in driver.current_url:
-        # The media links are formed from the media ID:
-        # https://photos.google.com/lr/photo/ID
-        # And get redirected to the acctual media url:
-        # https://photos.google.com/photo/AnotherID
-        sleep(0.5)
-        # Wait for the redirect
-
-    open_album_menu_status = open_album_menu(driver)
-    # Try to open the "add to album" menu.
-
-    if open_album_menu_status is not True:
-        # If the "add to album" menu couldn't be opened.
-        return open_album_menu_status
-
-    # Every thing went well.
-    return True
-
-#--------------------------------------------- WAIT FOR ELEMENT BY XPATH ---- #
-def wait_for_xpath(driver, xpath, timeout=5, poll_frequency=0.1):
+#----------------------------------------------- WAIT FOR ELEMENT BY CSS ---- #
+def wait_for_css(driver, css_selector, timeout=5, poll_frequency=0.1):
     # Wait for an elemnt to be available, visible and usable.
     # The wait is abandoned if it takes longer than the timeout in seconds.
 
     start = time()
 
     while time() - start < timeout:
-        # While time's not up
+        #While time's not up.
 
         try:
-            element = driver.find_element(By.XPATH, xpath)
+            element = driver.find_element(By.CSS_SELECTOR, css_selector)
             # The element exists.
+
             if element.is_displayed() and element.is_enabled():
-                # The element is visible and can be used.
                 return element
 
-        except NoSuchElementException:
-            # The element doesn't exist.
-            pass
+            except NosuchElementException:
+                # The element doesn't exists.
+                pass
 
-        sleep(poll_frequency)
+            sleep(poll_frequency)
 
-    # Time's up !
-    return False
+            # Time's up !
+            return False
 
 #------------------------------------------ SELECT THE MOST RECENT ALBUM ---- #
-def add_to_recent_album(driver):
-    # Click on the top, most recent album of the "add to album" menu.
+def select_album_byID(driver, album_id):
+    # Click on the album of the "add to album" menu, by album id.
 
-    top_album_xpath = "/html/body/div[2]/div/div[2]/div[2]/div/div/div/div[2]/div/ul/div[1]/li[1]"
-    # Full XPath to the clickable top album of the "recent" section in the
-    # "add to album" menu.
-    top_album_elem = wait_for_xpath(driver, top_album_xpath)
-    # Wait for "add to album" menu to be availble.
+    css_tag = f'data-id="{album_id}"'
+    # CSS selector element used to find the album in the menu.
 
-    if not top_album_elem:
-        # Exit if the top album element wasn't found
-        return "The top album of the \"recent\" section in the \"add to album\" menu couldn't be found."
-    
+    album_elem = wait_for_css(driver, css_selector)
+    # Wait for the album to be availble in the menu.
+
+    if not album_elem:
+        # Throw an error if the album wasn't found.
+        return 'The desired album couldn\'t be found in the "add to album" menu.'
+
     action = ActionChains(driver)
-    action.move_to_element(top_album_elem).click().perform()
-    # Find and click the album button.
+    action.move_to_element(album_elem).click().perform()
+    # Find and click the album from the menu.
 
+    # Everything went well.
     return True
 
 #------------------------------------------- ADD MEDIA TO ALBUM FROM URL ---- #
-def add_to_album(driver, media_url):
+def add_to_album(driver, album_id, media_url):
     # To add a photo to an album w/ google photo (from 2024-07-17):
-    # More options -> Add to album -> [select most recent album].
+    # More options -> Add to album -> [select the album].
 
     media_url = media_url[:-1] if media_url[-1] == "/" else media_url
-    # Allow redirect (for login) by removing the last "/" in the url.
+    # Allow redirect by removing the last "/" in the url.
 
-    driver.get(media_url)
-    # Go to the photo's actual url.
+    url_status = check_url(media_url)
 
-    while "photos.google.com/photo/" not in driver.current_url:
+    if url_status is not True:
+        # Non google photos url, send error message.
+        return url_status
+
+    else:
+        driver.get(media_url)
+        # Open media page, redirected to google photo login.
+
+    page_status = get_page_error(driver)
+
+    if page_status is not True:
+        # If there is a 404 error or an access denied, send error message.
+        return page_status
+
+    while "photos.google.com/photo/lr" in driver.current_url:
         # The media links are formed from the media ID:
         # https://photos.google.com/lr/photo/ID
         # And get redirected to the acctual media url:
         # https://photos.google.com/photo/AnotherID
-        sleep(0.5)
+
+        sleep(0.2)
         # Wait for the redirect
 
     open_album_menu_status = open_album_menu(driver)
@@ -168,12 +226,12 @@ def add_to_album(driver, media_url):
         # If the "add to album" menu couldn't be opened.
         return open_album_menu_status
 
-    add_to_recent_album_status = add_to_recent_album(driver)
-    # Try to add the media item to the most recent album.
+    select_album_byID_status = select_album_byID(driver)
+    # Try to add the media item to the desired album.
 
-    if add_to_recent_album_status is not True:
+    if select_album_byID_status is not True:
         # If media couldn't be added to the album.
-        return add_to_recent_album_status
+        return select_album_byID_status
 
     # Every thing went well
     return True

@@ -2,8 +2,8 @@
 This scripts creates an app that lists all the media items not in an album on
 Google Photos and adds them to a "needs triage" album selected by the user.
 
-The list of media items in google photo is fetched by python-rclone, based on
-rClone: https://rclone.org/
+The list of media items in google photo is fetched by python-rClone, based on
+rClone: https://rClone.org/
 
 The app is created with PyQt6, based on Qt v6: https://doc.qt.io/qt-6/
 
@@ -15,11 +15,13 @@ https://www.selenium.dev/
 import os
 import traceback, sys
 
+from time import sleep
+
 from rclone_python import rclone
 
 from find_albumless_media import get_albumless_media
 
-from add_to_album_web_bot import add_to_album, driver_init, album_init
+import add_to_album_web_bot as web_bot
 
 from PyQt6.QtCore import (
     Qt,
@@ -42,6 +44,8 @@ from PyQt6.QtWidgets import (
 
     QAbstractItemView,
     QListWidgetItem,
+    QErrorMessage,
+    QMessageBox,
     QListWidget,
     QPushButton,
     QTabWidget,
@@ -56,48 +60,300 @@ from PyQt6.QtWidgets import (
 
 
 
+def error_shit(error = "No error, why is it called?", parent=None):
+    print("\nTODO: Handle Errors !")
+    print(error)
+##    error_dialog = QErrorMessage()
+##    error_dialog.showMessage("Oh shit\n" + error)
+
+    msg = QMessageBox()
+    msg.critical(parent, "Error !", "An error has occured !\n" + str(error))
+
+
+
+
+
+
+
 
 
 
 class Worker_get_remotes(QThread):
     # Use threads to don't lock up the UI while refreshing the remotes lists.
 
-    finished = pyqtSignal()   # Finished signal.
-    result = pyqtSignal(list) # Result signal.
-    error = pyqtSignal(tuple) # Error signal.
+    finished = pyqtSignal(bool) # Finished signal.
+    result = pyqtSignal(list)   # Result signal.
+    error = pyqtSignal(tuple)   # Error signal.
 
     def __init__(self):
         super(Worker_get_remotes, self).__init__()
-
-        
 
     @pyqtSlot()
     def run(self):
 
         if not rclone.is_installed():
-            # No rclone
-            self.finished.emit()
+            # No rClone
+            self.finished.emit(False)
             # Stop.
             return None
 
         try:
             remotes = rclone.get_remotes()
             # Get the list of remotes
+
         except:
             traceback.print_exc()
             exctype, value = sys.exc_info()[:2]
             self.error.emit((exctype, value, traceback.format_exc()))
             # Handle errors.
+
         else:
             self.result.emit(remotes)
             # "Return" the results.
+
         finally:
-            self.finished.emit()
+            self.finished.emit(True)
             # Done.
 
 
+class Worker_search(QThread):
+    # Use threads to don't lock up the UI while searching in the remote.
+
+    progress = pyqtSignal(str)  # User message signal.
+    finished = pyqtSignal(bool) # Finished signal.
+    result = pyqtSignal(list)   # Result signal.
+    error = pyqtSignal(object)   # Error signal.
+
+    def __init__(self, remote):
+        super(Worker_search, self).__init__()
+        self.remote = remote
+
+    @pyqtSlot()
+    def run(self):
+
+        try:
+            for msg in get_albumless_media(self.remote):
+                # Step throught the search.
+
+                if type(msg) == str:
+                    # If yielded element isn't a list, it's a user message.
+                    self.progress.emit(msg)
+
+                elif type(msg) == list:
+                    # The last yielded element is a list of tuples containing
+                    # the name and ID for every albumless media item.
+                    media_info = msg
+
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            print("type of the trace back:\n", type(traceback.format_exc()),
+                  "\n", traceback.format_exc(), "\ndone.")
+            self.error.emit((traceback.format_exc()))
+            #self.error.emit((exctype, value, traceback.format_exc()))
+            # Handle errors.
+
+        else:
+            self.result.emit(media_info)
+
+        finally:
+            self.finished.emit(True)
+            # Done.
 
 
+class Worker_add_media_batchless(QThread):
+    # Use threads to don't lock up the UI while add items to album all at once.
+
+    status = pyqtSignal(str)    # User message signal.
+    help_str = pyqtSignal(str)  # Help step signal.
+    finished = pyqtSignal(bool) # Finished signal.
+    result = pyqtSignal(list)   # Result signal.
+    error = pyqtSignal(object)   # Error signal.
+    fail = pyqtSignal(list)     # Fail Signal.
+
+    def __init__(self, url_list, nex_button):
+        super(Worker_add_media_batchless, self).__init__()
+        #self.driver = driver
+        self.url_list = url_list
+        self.next_button = nex_button
+        self.album_id = ""
+        self.url_fail = []
+        # List of urls failed to add to album, and the cause.
+
+
+    @pyqtSlot()
+    def run(self):
+        self.driver = driver_init()
+        # Start the chrome driver.
+
+        goto_albums(self.driver)
+        # Open albums list.
+
+        next_button.clicked.disconnect()
+        next_button.clicked.connect(self.album_selected)
+        # Repurpuse the button for album confirmation
+
+    def album_selected(self):
+        album_id_status = goto_albums(driver)
+        # Make the user login & select/create an album.
+
+        if album_id_status[0] is False:
+            # Not a google photos album.
+
+            error_shit(error = album_id_status[1])
+
+            try: self.driver.quit()
+            except NameError: pass
+            # Close the driver if still opened.
+
+            return None
+
+        else:
+            self.album_id = album_id_status[1]
+
+        self.status.emit("Status:\n\tAlbum selected.")
+        self.add_all()
+        # Add all media to the album.
+
+
+
+    def add_all(self):
+        self.status.emit("Status:\n\tWeb bot running.")
+        self.help_str.emit(get_listing_help(2))
+        # Add to album, info for user.
+
+        for media_url in self.url_list[1::]:
+            # Step throught the url list.
+            self.status.emit(f"Status:\n\tNow adding media url:\n\t"
+                             "{media_url}\n\t"
+                             "to the bulk album.")
+
+            add_to_album_status = add_to_album(self.driver,
+                                               self.album_id,
+                                               self.media_url,)
+
+            if add_to_album_status is not True:
+                # Smth went wrong :/
+                status_text = ("Status: /!\\ ERROR /!\\\n\t"
+                               f"Failed to adding media url:\n\t"
+                               "{media_url}\n\t"
+                               "to the bulk album.\nCause:\n" +
+                               add_to_album_status)
+
+                self.status.emit(status_text)
+                # User informed of fail.
+
+                self.url_fail.append((media_url, add_to_album_status))
+                # Keep fails.
+
+
+        self.fail.emit(self.url_fail)
+        # Media items not added to album.
+
+        self.finished.emit(True)
+        # Done.
+
+        try: self.driver.quit()
+        except NameError: pass
+        # Close the driver if still opened.
+
+##                album_init_status = album_init(driver, self.url_list[1])
+##                # Use the 1st media item to init the album.
+##
+##                if album_init_status is not True:
+##                    # Smth went wrong :/
+##                    self.status.emit("Status: /!\\ ERROR /!\\\n\t" +
+##                                     album_init_status)
+##                    error_shit(album_ini_status)
+##                    self.finished.emit(False)
+##                    return None
+
+##                while next_button.isDisabled():
+##                    print("dodo")
+##                    sleep(0.1)
+##                    print("not dodo")
+##                    # Wait for user to press next.
+
+##                self.status.emit("Status:\n\tWeb bot running.")
+##                self.help_str.emit(get_listing_help(2))
+##                # Add to album, info for user.
+##
+##                for media_url in self.url_list[1::]:
+##                    # Step throught the url list.
+##                    self.status.emit(f"Status:\n\tNow adding media url:\n\t"
+##                                     "{media_url}\n\t"
+##                                     "to the bulk album.")
+##                    add_to_album_status = add_to_album(driver, media_url)
+##
+##                    if add_to_album_status is not True:
+##                        # Smth went wrong :/
+##                        status_text = ("Status: /!\\ ERROR /!\\\n\t"
+##                                       f"Failed to adding media url:\n\t"
+##                                       "{media_url}\n\t"
+##                                       "to the bulk album.\nCause:\n"
+##                                       )#add_to_album_status)
+##                        self.status.emit(status_text)
+##                        # User informed of fail.
+##                        url_fail.append((media_url, add_to_album_status))
+##                        # Keep fail.
+
+        except:
+            traceback.print_exc()
+            # Print error.
+
+            exctype, value = sys.exc_info()[:2]
+            self.error.emit((exctype, value, traceback.format_exc()))
+            # Emit error error message box.
+
+            
+
+
+    
+
+
+"""
+    def add_to_album_batchless(self):
+        links = [f"https://photos.google.com/lr/photo/" + i[1]
+                 for i in self.media_info]
+        #Get list of URLs.
+
+        self.Listing["Help"].setText(get_listing_help(1))
+        self.Listing["AddToAlbum"].setText("Next >")
+        self.repaint() # It's dirty, I know, -_-
+
+        with driver_init() as driver:
+            # Initiate the chromium driver.
+            # "with" automaticaly closes the driver if an error is thrown.
+
+            album_init_status = album_init(driver, links[0])
+            # Ask user to login & create/select the bulk album.
+
+            print("ASK USER TO NOT COMPLETELY SQUISH THE WINDOW WHE RESIZING IT")
+
+            while not self.Listing["AddToAlbum"].isDown():
+                sleep(0.1)
+                repaint() # It's dirty, I know, -_-
+                self.processEvents()
+            #input("Press enter when the album is created/selected (detect it!).")
+            print("Next!")
+
+            if album_init_status is not True:
+                # If the album couldn't be initiated.
+                self.add_to_album_error(album_init_status)
+                return album_init_status
+
+            for link in links[1::]:
+                # Ignore the 1st link, added by user.
+                add_to_album_status = add_to_album(driver, link)
+
+                if add_to_album_status is not True:
+                    # If the media item couldn't be added to the album.
+                    self.add_to_album_error(add_to_album_status)
+                    return add_to_album_status
+
+        # Everything went well.
+        return True
+"""
 
 
 
@@ -120,7 +376,7 @@ def init_selection():
     # Only the program can add remotes names.
 
     selection["Refresh"].setText("Refresh")
-    # Refresh button when rclone config is changed.
+    # Refresh button when rClone config is changed.
 
     selection["Help"].setText("Add helpful text here.")
     selection["Help"].setWordWrap(False)
@@ -190,6 +446,7 @@ def init_listing():
         "Is_batch" : QCheckBox(),
         "Batch_size" : QSpinBox(),
         "Continue" : QPushButton(),
+        "Status" : QLabel(),
         "Help": QLabel()
         }
 
@@ -247,6 +504,8 @@ def init_listing():
     nameList_layout.addWidget(listing["Name"])
     # Names list layout.
 
+    print("TODO: listing Status setup (add as selectable (link))")
+
     listing["Help"].setText("Add helpful text here.")
     listing["Help"].setWordWrap(True)
     listing["Help"].setTextInteractionFlags(
@@ -272,7 +531,6 @@ def init_listing():
     listing_layout.addWidget(listing["Title"], stretch = 1)
     listing_layout.addWidget(listing["Info"], stretch = 1)
     listing_layout.addLayout(lists_layout, stretch = 40)
-    # TODO: add streatch so the list takes all the place.
     listing_layout.addWidget(listing["AddToAlbum"], stretch = 1)
     listing_layout.addLayout(batches_layout, stretch = 1)
     listing_layout.addWidget(listing["Continue"], stretch = 1)
@@ -285,38 +543,38 @@ def get_selection_help():
     # Return the text for the help in the selection section.
 
     if not rclone.is_installed():
-        # If rclone is not in the folder nor installed.
+        # If rClone is not in the folder nor installed.
         text = ("\n/!\\ WARNING:\n"
                 "The rClone executable wasn't found in this executable's "
                 "directory nor in the %PATH% env variable:"
                 "\n1) Download rClone from:\n\n"
-                    "\thttps://rclone.org/downloads/#release\n\n"
-                "2) Extract \"rclone.exe\" from the archive and place it "
+                    "\thttps://rClone.org/downloads/#release\n\n"
+                "2) Extract \"rClone.exe\" from the archive and place it "
                 "same folder:\n\n"
                     f"\t{os.getcwd()}\n\n"
                 "3) Comme back and hit Refresh.\n"
                 "\n------------------------------\n"
-                "Docs: https://rclone.org/install/#quickstart")
+                "Docs: https://rClone.org/install/#quickstart")
         return text
 
 
     elif rclone.get_remotes() == []:
-        # If rclone has no remote(s).
+        # If rClone has no remote(s).
         header = "\nHELP:\nIf you haven't created your remote:\n"
     else:
-        # If rclone has remote(s).
+        # If rClone has remote(s).
         header = "\nHELP:\nTo create a new remote:\n"
 
 
     body = ("1) Open your CMD and go to this executable's directory:\n"
                 f"\n\tcd {os.getcwd()}\n\n"
             "2) Create a new remote by typing:\n\n"
-                "\trclone config\n\n"
+                "\trClone config\n\n"
             "3) Follow the instructions to create a new google photo remote.\n"
             "4) Comme back and hit Refresh.\n"
             "\n------------------------------\n"
-            "Docs: https://rclone.org/googlephotos/")
-    # Rclone new remote instruction.
+            "Docs: https://rClone.org/googlephotos/")
+    # rClone new remote instruction.
 
     return header+body
 
@@ -333,7 +591,7 @@ def get_search_help(remote_name):
             "1) Open your CMD and go to this executable's directory:\n\n"
                 f"\tcd {os.getcwd()}\n\n"
             "2) Run:\n\n"
-                f"\trclone lsd {remote_name}album\n\n"
+                f"\trClone lsd {remote_name}album\n\n"
             "- If the token isn't expired you will see a list of your albums."
             "\n- If the token is expired you will recive a message saying so:"
             " Follow the instructions to recive a new token.")
@@ -393,11 +651,6 @@ def add_widget_to_list(QList, widget):
 
 
 
-
-def error_shit(error = "No error, why is it called?"):
-    print(error)
-
-
 # ============================================================ MAIN WINDOW == #
 class MainWindow(QMainWindow):
 
@@ -433,8 +686,6 @@ class MainWindow(QMainWindow):
 
         self.Search["Search"].clicked.connect(self.search_media)
 
-
-
         # Step 3: Add the albumless media to a single album.
         self.Listing, listing_layout = init_listing()
 
@@ -460,114 +711,107 @@ class MainWindow(QMainWindow):
         # Load all.
         self.refresh()
 
-
         self.setCentralWidget(self.tabs)
 
     # ============================================ MAIN WINDOW FUNCTIONS ==== #
+    # ------------------------------------------------- CHECK FOR RCLONE ---- #
+    def rclone_status(self):
+        # Check if the rClone executable is availble.
+
+        if rclone.is_installed():
+            # rClone here, nothing to do.
+            self.unlock_ui()
+            return True
+
+        # rClone not availble, lock all.
+        self.tabs.setCurrentIndex(0) # Go to 1st tab.
+        self.lock_ui()
+        error_shit("The rclone executable couldn't be found or used.", self)
+        return False
+
+    # --------------------------------------- CHECK FOR GOOD REMOTE NAME ---- #
+    def remote_status(self):
+        # Check if it is all good for rClones calls.
+
+        # rClone not availble, lock all.
+        rclone_here = self.rclone_status()
+        if not rclone_here:
+            # Info for user.
+            return False
+
+        # No remotes, lock all.
+        if self.remote == "":
+            self.tabs.setCurrentIndex(0) # Go to 1st tab.
+            self.lock_ui()
+            error_shit("You have no remotes.", self)
+            return False
+
+        # Evreything ok.
+        self.unlock_ui()
+        self.Search["Search"].setEnabled(True)
+        return True
 
     # ---------------------------------------- UPDATE THE CURRENT REMOTE ---- #
     def update_remote(self, remote_name):
         self.remote = remote_name
         # Change remote
 
+        self.remote_status()
+        # Verify rClone and remote name
+
         self.Search["Search"].setText(
             "Search for albumless media in " + self.remote[:-1])
         # Update the Search button text (removed the trailing colon).
-        
         self.Search["Help"].setText(get_search_help(self.remote))
         # Update the "Search" help section.
 
-        if remote_name == "": # If remote name is empty.
-            self.Search["Search"].setEnabled(False)
-            # Disable search
-        else: # If remote has a name.
-            self.Search["Search"].setEnabled(True)
-            # Enable search
-
-##    # ----------------------------------------- UPDATE THEE REMOTES LIST ---- #
-##    def refresh(self):
-##        #======= Update tab 1 (selection) =======#
-##        self.Selection["ComboBox"].clear()
-##
-##        if rclone.is_installed():
-##            self.Selection["ComboBox"].addItems(rclone.get_remotes())
-##        # Update list of remotes if rclone is installed.
-##
-##        self.Selection["Help"].setText(get_selection_help())
-##        # Update the help section.
-##
-##        #======== Update tab 2 (search) =========#
-##        self.Search["Search"].setText(
-##            "Search for albumless media in " + self.remote[:-1])
-##        # Update the Search button text (removed the trailing colon).
-##
-##        self.Search["Help"].setText(get_search_help(self.remote))
-##        # Update the help section.
-##
-##        #=============== Lock UI ================#
-##        if self.remote =="" or (not rclone.is_installed()):
-##            # If no remotes are found or if rclone is unavalaible.
-##
-##            for i in range(1, self.tabs.count()):
-##                self.tabs.setTabEnabled(i, False)
-##            # Disable all the tabs except the 1st.
-##
-##
-##        else: # If rclone is avalaible.
-##
-##            for i in range(1, self.tabs.count()):
-##                self.tabs.setTabEnabled(i, True)
-##            # Enable all the tabs
-##
-##            self.tabs.setCurrentIndex(0)
-##            # Go to the 1st tab.
-
     # ----------------------------------------- UPDATE THEE REMOTES LIST ---- #
     def refresh(self):
-        #======= Update tab 1 (selection) =======#
-        self.Selection["ComboBox"].clear()
-
-        self.refresh_thread = Worker_get_remotes()
-
-        self.refresh_thread.result.connect(
-            self.Selection["ComboBox"].addItems)
-
-        self.refresh_thread.error.connect(error_shit)
         
-        self.refresh_thread.start()
-        # Get list of remotes without locking up the UI.
-        print("TODO: Handle Errors !")
-        print("TODO: Try inline worker result connect.")
+        def combobox_update(items):
+            remote = self.remote
+            # Keep remote name.
 
+            self.Selection["ComboBox"].addItems(items)
+            # Fill the combobox.
+
+            index = self.Selection["ComboBox"].findText(remote)
+            # Get new index of previous remote name (-1 if not found).
+            if -1 < index < self.Selection["ComboBox"].count():
+                # If index was found (>-1) and is selectable.
+                self.Selection["ComboBox"].setCurrentIndex(index)
+                # Go to previous remote's index.
+
+        self.Selection["ComboBox"].blockSignals(True)
+        self.Selection["ComboBox"].clear()
+        self.Selection["ComboBox"].blockSignals(False)
+        # Avoid UI updates while clearing.
 
         self.Selection["Help"].setText(get_selection_help())
-        # Update the help section.
+        # Update the "Selection" help section.
 
-        #======== Update tab 2 (search) =========#
-        # Handled by the self.remote_update() function.
+        remote_here = self.rclone_status()
 
-        #============== UI Update ===============#
-        if self.remote =="" or (not rclone.is_installed()):
-            # If no remotes are found or if rclone is unavalaible.
+        # Stop the refresh if rClone not availble.
+        if not remote_here:
+            return None
 
-            for i in range(1, self.tabs.count()):
-                self.tabs.setTabEnabled(i, False)
-            # Disable all the tabs except the 1st.
+        self.refresh_thread = Worker_get_remotes()
+        # Thread to not lock up the UI.
 
-
-        else: # If rclone is avalaible.
-
-            for i in range(1, self.tabs.count()):
-                self.tabs.setTabEnabled(i, True)
-            # Enable all the tabs
-
-            self.tabs.setCurrentIndex(0)
-            # Go to the 1st tab.
+        self.refresh_thread.result.connect(combobox_update)
+        self.refresh_thread.error.connect(error_shit)
+        # Handle results & errors.
+            
+        self.refresh_thread.start()
+        # Get remotes
 
     # --------------------------------- SEARCH FOR ALBUMLESS MEDIA ITEMS ---- #
     def search_media(self):
 
-        if not rclone.is_installed(): # If rclone is un avalaible
+        print("searching")
+
+        if not rclone.is_installed(): # If rClone is un avalaible
             self.refresh() # Refresh and
             return None    # exit.
 
@@ -576,47 +820,42 @@ class MainWindow(QMainWindow):
             self.refresh() # Refresh and
             return None    # exit.
 
-        # Lock UI
-        for i in range(self.tabs.count()):
-                self.tabs.setTabEnabled(i, False)
-        self.tabs.setCurrentIndex(1)
-        # Stay on the 2nd tab.
-
         # Get Albumless media.
+        def progress_message(msg):
+            self.Search["Status"].setText("Status:\n\t" + msg)
 
-        def get_albumless_media_work(remote, ):
-            for msg in get_albumless_media(self.remote):
-                # Fetch get_albumless_media notification.
-                if type(msg) == list:
-                    # The last yielded element is a list of tuples containing the
-                    # name and the url for every albumless media item.
-                    #self.media_info = msg
-                    return msg
+        def media_info_fetched(media_info):
+            self.media_info = media_info
+            self.tabs.setCurrentIndex(2)
+            # Go to the 3rd tab.
+            self.repopulate_listing(self.media_info)
+            # Fill the lists for the name & url for each albumless items.
+            self.unlock_ui()
 
-                else:
-                    progress_callback
-                    # If yielded element isn't a list, it is a user message.
-                    #self.Search["Status"].setText("Status: " + msg)
-                    #self.repaint() # It's dirty, I know, -_-
+        self.search_thread = Worker_search(self.remote)
 
-        self.tabs.setCurrentIndex(2)
-        # Go to the 3rd tab.
+        self.search_thread.progress.connect(progress_message)
+        self.search_thread.result.connect(media_info_fetched)
+        self.search_thread.error.connect(error_shit)
+        self.search_thread.error.connect(self.unlock_ui)
+        self.search_thread.error.connect(self.refresh)
 
-        self.repopulate_listing(self.media_info)
-        # Fill the lists for the name & url for each albumless items.
+        self.search_thread.start()
 
-        # Unlock UI
-        for i in range(self.tabs.count()):
-                self.tabs.setTabEnabled(i, True)
+        self.lock_ui()
+        self.tabs.setTabEnabled(1, False)
+        # Disable all to avoid button spam.
 
     # ----------------------------------------- SHOW USER ALBULESS MEDIA ---- #
     def repopulate_listing(self, media_info):
         # Put the names & links of the media items in the lists of tab 3.
+        print("TODO: extract 'repopulate_listing' func from the class.")
+
+        self.media_info = media_info
 
         self.Listing["Name"].clear()
         self.Listing["Link"].clear()
         # Clear lists
-
 
         dupe_count = 0
         total_count = len(media_info)
@@ -657,8 +896,6 @@ class MainWindow(QMainWindow):
         # Fit the links list to it's content.
 
         # ------------------------------------------ UPDATE INFO BOX -------- #
-        # TODO: add info
-
         self.Listing["Info"].setText("Info:\n\t"
                                      "Albumless media items count: "
                                      f"{total_count}\n\t"
@@ -671,14 +908,12 @@ class MainWindow(QMainWindow):
             # Activate "add to album" button.
 
 
-
-    def add_to_album_error(self, error):
-        print(error)
-
-
-
-
     def add_to_album_batchless(self):
+        print("TODO: UI lock & unlock (add to album)")
+
+        def add_to_album_done():
+            print("reconect self.Listing['AddToAlbum'] the add to album func.")
+
         links = [f"https://photos.google.com/lr/photo/" + i[1]
                  for i in self.media_info]
         #Get list of URLs.
@@ -687,50 +922,47 @@ class MainWindow(QMainWindow):
         self.Listing["AddToAlbum"].setText("Next >")
         self.repaint() # It's dirty, I know, -_-
 
-        with driver_init() as driver:
-            # Initiate the chromium driver.
-            # "with" automaticaly closes the driver if an error is thrown.
+        self.add_media_thread = Worker_add_media_batchless(
+            links,
+            nex_button = self.Listing["AddToAlbum"]
+            )
 
-            album_init_status = album_init(driver, links[0])
-            # Ask user to login & create/select the bulk album.
+        self.add_media_thread.help_str.connect(
+            self.Listing["Help"].setText)
+        self.add_media_thread.finished.connect(add_to_album_done)
+        # Help section update.
+        #self.add_media_thread.status.connect()
+        # Keep user informed of status.
+        #self.add_media_thread.fail.connect()
+        # Show user failed add to album media items.
+        self.add_media_thread.error.connect(error_shit)
 
-            print("ASK USER TO NOT COMPLETELY SQUISH THE WINDOW WHE RESIZING IT")
-
-            while not self.Listing["AddToAlbum"].isDown():
-                sleep(0.1)
-                repaint() # It's dirty, I know, -_-
-                self.processEvents()
-            #input("Press enter when the album is created/selected (detect it!).")
-            print("Next!")
-
-            if album_init_status is not True:
-                # If the album couldn't be initiated.
-                self.add_to_album_error(album_init_status)
-                return album_init_status
-
-            for link in links[1::]:
-                # Ignore the 1st link, added by user.
-                add_to_album_status = add_to_album(driver, link)
-
-                if add_to_album_status is not True:
-                    # If the media item couldn't be added to the album.
-                    self.add_to_album_error(add_to_album_status)
-                    return add_to_album_status
-
-        # Everything went well.
-        return True
-
+        self.add_media_thread.start()
 
     # ------------------------------------------------------ LOCK THE UI ---- #
-    def lock_ui():
+    def lock_ui(self, *args):
         current_tab = self.tabs.currentIndex()
         # Get the current tab index
 
-        for i in range(1, self.tabs.count()):
+        for i in range(self.tabs.count()):
+            if i != current_tab:
                 self.tabs.setTabEnabled(i, False)
-        # Disable all the tabs
+                print("locked tab:", i)
+        # Disable all the tabs except the current one.
 
+        self.tabs.setCurrentIndex(current_tab)
+        # Go back 
+
+    # ---------------------------------------------------- UNLOCK THE UI ---- #
+    def unlock_ui(self, *args):
         current_tab = self.tabs.currentIndex()
+        # Get the current tab index
+
+        for i in range(self.tabs.count()):
+            self.tabs.setTabEnabled(i, True)
+        # Enable all the tabs
+
+        self.tabs.setCurrentIndex(current_tab)
         # Go back 
         
 
@@ -742,9 +974,6 @@ class MainWindow(QMainWindow):
 #=============================================================================#
 
 if __name__ == "__main__":
-
-    print("TODO: Setup refresh(), search() & addtoalbum() as worker threads.")
-
     
     app = QApplication(sys.argv)
 
@@ -752,3 +981,47 @@ if __name__ == "__main__":
     window.show()
 
     app.exec()
+
+
+
+
+
+
+
+##    # ----------------------------------------- UPDATE THEE REMOTES LIST ---- #
+##    def refresh(self):
+##        #======= Update tab 1 (selection) =======#
+##        self.Selection["ComboBox"].clear()
+##
+##        if rclone.is_installed():
+##            self.Selection["ComboBox"].addItems(rclone.get_remotes())
+##        # Update list of remotes if rClone is installed.
+##
+##        self.Selection["Help"].setText(get_selection_help())
+##        # Update the help section.
+##
+##        #======== Update tab 2 (search) =========#
+##        self.Search["Search"].setText(
+##            "Search for albumless media in " + self.remote[:-1])
+##        # Update the Search button text (removed the trailing colon).
+##
+##        self.Search["Help"].setText(get_search_help(self.remote))
+##        # Update the help section.
+##
+##        #=============== Lock UI ================#
+##        if self.remote =="" or (not rclone.is_installed()):
+##            # If no remotes are found or if rClone is unavalaible.
+##
+##            for i in range(1, self.tabs.count()):
+##                self.tabs.setTabEnabled(i, False)
+##            # Disable all the tabs except the 1st.
+##
+##
+##        else: # If rClone is avalaible.
+##
+##            for i in range(1, self.tabs.count()):
+##                self.tabs.setTabEnabled(i, True)
+##            # Enable all the tabs
+##
+##            self.tabs.setCurrentIndex(0)
+##            # Go to the 1st tab.
