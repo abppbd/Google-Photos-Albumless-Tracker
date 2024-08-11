@@ -1,7 +1,7 @@
 # What is Google Photos Albumless Tracker (GPAT) ?
 With [Google Photos (GP)](https://photos.google.com/) you can create albums to organize your media items (photos, videos...). But you can't easily find the unorganized ones mindlessly floating in your Google Photos aether !
 
-_Google Photos Albumless Tracker_ is a GUI based app that finds albumless media, and adds them to a "needs triage album" with a web bot.
+_Google Photos Albumless Tracker_ is a GUI based app that finds albumless media, and adds them to a "needs triage" album with a web bot.
 
 <sup>You can the app run from the bare python script or from the executable bundle, instructions bellow</sup>
 
@@ -13,14 +13,14 @@ _Google Photos Albumless Tracker_ is a GUI based app that finds albumless media,
   - [Requirements](#requirements-1)
   - [Download](#download-1)
   - [Running](#running-1)
-- [Usage](usage)
+- [Usage](#usage)
 - [Info & Credits](#info--credits)
 - [Possible Failure Points](possible-failure-points)
 
 
 # From the python script
 ## Requirements
-The scripts where written and tested with [Python 3.12.4](https://www.python.org/downloads/release/python-3124/).
+The scripts was written and tested with [Python 3.12.4](https://www.python.org/downloads/release/python-3124/).
 
 ### Packages
 Before running the script you will need to install some packages:
@@ -54,20 +54,32 @@ For the python script you need these 7 files:
 - [GPAT light mode v2.ico](https://github.com/abppbd/Google-Photos-Albumless-Tracker/blob/main/GPAT%20light%20mode%20v2.ico) (optional)
 - [GPAT dark mode v2.ico](https://github.com/abppbd/Google-Photos-Albumless-Tracker/blob/main/GPAT%20dark%20mode%20v2.ico) (optional)
 
+Download the code and extract these files to a folder, the standalone rClone executable should be put in the same folder.
+
 ## Running
 The main script is [GP Albumless tracker.py](https://github.com/abppbd/Google-Photos-Albumless-Tracker/blob/main/GP%20Albumless%20tracker.py), launch it to start the app.
 A window should appear, more [info here](#usage).
 
+You can create your own executable bundle with the [pyinstalling.bat](https://github.com/abppbd/Google-Photos-Albumless-Tracker/blob/main/pyinstalling.bat) batch file.
+Or you can pass this command in you command line after navigating to directory containing the main script:
+```bash
+pyinstaller --add-data="find_albumless_media.py:." --add-data="web_bot_controller.py:." --add-data="web_bot_functions.py:." --add-data="workers.py:." --add-data="GPAT dark mode v2.ico:." --add-data="GPAT light mode v2.ico:." -i="GPAT light mode v2.ico" "GP Albumless tracker.py"
+```
 
 # From the EXE build
 ## Requirements
-Python and all the needed packages are bundled with the .exe file.
+Python and all the associated packages are bundled with the .exe file.
 
 ### rClone
 The executable file uses [rClone](https://rclone.org/) which should be downloaded.
 - (Recommended) For the satandalone executable, go to [rClone downloads](https://rclone.org/downloads), download the appropriate one for your device, and place it in the folder "GP Albumless tracker", next to the executable. <sub>(tested with _GPAT_)</sub>
 - To install it on your machine, go to [rClone install](https://rclone.org/install) and follow the instructions. <sub>(/!\ not tested with _GPAT_ /!\\)</sub>
+
 You will have to create a "remote" to your Google Photos account, [follow the instructions with "rclone config"](https://rclone.org/googlephotos/#configuration).
+
+## Download
+The executableand the files are in the [dist/GP Albumless tracker](https://github.com/abppbd/Google-Photos-Albumless-Tracker/tree/main/dist/GP%20Albumless%20tracker) folder.
+Download the code, and extract the folder `\dist\GP Albumless tracker` (you should put the rClone executable in the same folder as "GP Albumless tracker.exe").
 
 ## Running
 From file explorer or from the command line, navigate to where GPTA's and rclone's executables are located, then launch "GP Albumless tracker.exe".
@@ -99,6 +111,8 @@ When the web bot is launched a `Web Bot Controller` (WBC) window and a `chrome b
 
 While the web bot runs you can paus it with the same button (the web bot can take up to 10s to stop).
 Use the `Kill` button to close the web bot.
+
+When the web bot is done or killed, a window will popup showing all the media items that couldn't be added to the album.
 
 
 # Info & Credits
