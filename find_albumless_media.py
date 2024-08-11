@@ -6,10 +6,7 @@ Inspired by:
 https://support.google.com/photos/thread/12363001?hl=en&msgid=81969237
 """
 
-import sys
-import subprocess
 from rclone_python import rclone
-from pprint import pprint
 
 #-----------------------------------------------------------------------------#
 def ls_only_id(ls_json):
@@ -54,8 +51,6 @@ def get_album_media(remote):
     # Fetch every media in any album
 
     return ls_album_media_files
-
-
 
 #-----------------------------------------------------------------------------#
 def albumless_links(media_name, media_id):
@@ -102,13 +97,3 @@ def get_albumless_media(remote):
     yield "Done. :)"
 
     yield links
-
-
-#-----------------------------------------------------------------------------#
-if __name__ == "__main__":
-
-    if not rclone.is_installed():
-        sys.exit("The rclone executable is not in the same directory as this script.")
-    # Stop if the rclone_python lib won't work.
-
-    main()
