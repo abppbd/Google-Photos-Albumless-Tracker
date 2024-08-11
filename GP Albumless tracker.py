@@ -14,25 +14,27 @@ https://www.selenium.dev/
 
 import os
 import traceback, sys
+
 from time import sleep
-from math import sqrt
 
 from rclone_python import rclone
 
-from workers import Worker_get_remotes, Worker_search
-from web_bot_controller import web_bot_controller
+from find_albumless_media import get_albumless_media
+
+import add_to_album_web_bot as web_bot
 
 from PyQt6.QtCore import (
+    Qt,
+    QThread,
     pyqtSignal,
     pyqtSlot,
-    QThread,
-    Qt,
+    QThreadPool,
+    QRunnable,
+    QObject
     )
-from PyQt6.QtGui import (
-    QPalette,
-    QFont,
-    QIcon
-    )
+
+from PyQt6.QtGui import QFont
+
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -40,7 +42,9 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QVBoxLayout,
 
+    QAbstractItemView,
     QListWidgetItem,
+    QErrorMessage,
     QMessageBox,
     QListWidget,
     QPushButton,
@@ -50,158 +54,310 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QWidget,
     QLabel,
-    QStyle
     )
 
-# Add the icon on the task bar.
 
-def get_icon_path(window):
 
-    # Get the window theme color.
-    color = window.palette().color(QPalette.ColorRole(10))
-    print("The Window color is", color.red(), color.green(), color.blue())
 
-    """
-    Brightness thanks to Darel Rex Finley:
-        https://alienryderflex.com/hsp.html
-    """
-    brightness  =  sqrt(0.299 * color.red()**2 +
-                        0.587 * color.green()**2 +
-                        0.114 * color.blue()**2 )
 
-    # Window QPalette is bright.
-    if brightness > 127.5:
-        icon_name = "GPAT light mode v2.ico"
-        print("Using the light mode icon.")
-
-    # Window QPalette is dark.
-    else:
-        icon_name = "GPAT dark mode v2.ico"
-        print("Using the dark mode icon.")
-
-    # Get the path to the ico file.
-    cwd = os.getcwd()
-    for folder, subfolders, files in os.walk(cwd):
-        for f in files:
-            if f == icon_name:
-                return os.path.join(folder, f)
-
-# --------------------------------------------------- ADD WIDGET TO QLISTWIDGET
-def add_widget_to_list(QList, widget):
-    """
-    Add widgets to QListWidget, thanks to Jablonski & eric:
-        https://stackoverflow.com/a/26199829
-    """
-    
-    # Create an item for QListWidget.
-    listItem = QListWidgetItem()
-
-    # Add the QList item.
-    QList.addItem(listItem)
-
-    # Set the QList item to the widget.
-    QList.setItemWidget(listItem, widget)
-
-# ---------------------------------------------------------- ADD TO ALBUM FAILS
-class web_bot_fail(QWidget):
-
-    def __init__(self, fails = [], parent=None):
-        super(web_bot_fail, self).__init__(parent)
-
-        # Display QWidget as window despite being a child.
-        self.setWindowFlags(Qt.WindowType(1))
-
-        self.setWindowTitle("Media Items Fail")
-
-        header = QLabel("Some media items couldn't be added to an album :")
-        header_font = QFont()
-        header_font.setPointSize(12)
-        header_font.setBold(True)
-        header.setFont(header_font)
-
-        # Acknowledgement button.
-        ok_b = QPushButton("OK")
-        ok_b.setFixedWidth(100)
-        ok_b.clicked.connect(self.close)
-
-        # Tiles of the lists
-        link_title = QLabel("Failed links :")
-        cause_title = QLabel("Reason for Failure :")
-
-        # Create the two list widgets.
-        links_list = QListWidget()
-        cause_list = QListWidget()
-
-        # Sync up the two lists' selections.
-        links_list.currentRowChanged.connect(cause_list.setCurrentRow)
-        cause_list.currentRowChanged.connect(links_list.setCurrentRow)
-        # Get and sync up the two lists' scrolls.
-        vs_link = links_list.verticalScrollBar()
-        vs_cause = cause_list.verticalScrollBar()
-        vs_link.valueChanged.connect(vs_cause.setValue)
-        vs_cause.valueChanged.connect(vs_link.setValue)
-
-        # Fill the lists.
-        for item in fails:
-            link = item[0]
-            cause = item[1]
-
-            # Clickable link.
-            link_label = QLabel()
-            link_label.setOpenExternalLinks(True)
-            link_label.setText(f"<a href={link}>{link}</a>")
-            add_widget_to_list(links_list, link_label)
-
-            # Selectable text.
-            cause_label = QLabel(cause)
-            add_widget_to_list(cause_list, cause_label)
-            cause_label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse)
-
-        # Fit the links list to it's content plus 18 px for the scroll bar.
-        links_list.setMaximumWidth(
-            links_list.sizeHintForColumn(0) + 18)
-
-        # Links layout
-        link_lay = QVBoxLayout()
-        link_lay.addWidget(link_title)
-        link_lay.addWidget(links_list)
-
-        # Causes layout
-        cause_lay = QVBoxLayout()
-        cause_lay.addWidget(cause_title)
-        cause_lay.addWidget(cause_list)
-
-        # Join the lists
-        lists_layout = QHBoxLayout()
-        lists_layout.addLayout(link_lay)
-        lists_layout.addLayout(cause_lay)
-
-        # Add all to the class widget.
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(header)
-        main_layout.addLayout(lists_layout)
-        main_layout.addWidget(ok_b, alignment=Qt.AlignmentFlag.AlignRight)
-        self.setLayout(main_layout)
-
-        # Add the "/!\" icon.
-        pixmap = QStyle.StandardPixmap.SP_MessageBoxWarning
-        icon = self.style().standardIcon(pixmap)
-        self.setWindowIcon(icon)
-
-# ------------------------------------------------------------ ERROR DIALOG BOX
 def error_shit(error = "No error, why is it called?", parent=None):
-    print("\nAn error has occured:\n", "Error message Start:\n", error,
-          "\nError message End.\n")
+    print("\nTODO: Handle Errors !")
+    print(error)
+##    error_dialog = QErrorMessage()
+##    error_dialog.showMessage("Oh shit\n" + error)
 
-    msg = QMessageBox(parent=parent)
-    pixmap = QStyle.StandardPixmap.SP_MessageBoxCritical
-    icon = msg.style().standardIcon(pixmap)
-    msg.setWindowIcon(icon)
+    msg = QMessageBox()
+    msg.critical(parent, "Error !", "An error has occured !\n" + str(error))
+
+
+
+
+
+
+
+
+
+
+class Worker_get_remotes(QThread):
+    # Use threads to don't lock up the UI while refreshing the remotes lists.
+
+    finished = pyqtSignal(bool) # Finished signal.
+    result = pyqtSignal(list)   # Result signal.
+    error = pyqtSignal(tuple)   # Error signal.
+
+    def __init__(self):
+        super(Worker_get_remotes, self).__init__()
+
+    @pyqtSlot()
+    def run(self):
+
+        if not rclone.is_installed():
+            # No rClone
+            self.finished.emit(False)
+            # Stop.
+            return None
+
+        try:
+            remotes = rclone.get_remotes()
+            # Get the list of remotes
+
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.error.emit((exctype, value, traceback.format_exc()))
+            # Handle errors.
+
+        else:
+            self.result.emit(remotes)
+            # "Return" the results.
+
+        finally:
+            self.finished.emit(True)
+            # Done.
+
+
+class Worker_search(QThread):
+    # Use threads to don't lock up the UI while searching in the remote.
+
+    progress = pyqtSignal(str)  # User message signal.
+    finished = pyqtSignal(bool) # Finished signal.
+    result = pyqtSignal(list)   # Result signal.
+    error = pyqtSignal(object)   # Error signal.
+
+    def __init__(self, remote):
+        super(Worker_search, self).__init__()
+        self.remote = remote
+
+    @pyqtSlot()
+    def run(self):
+
+        try:
+            for msg in get_albumless_media(self.remote):
+                # Step throught the search.
+
+                if type(msg) == str:
+                    # If yielded element isn't a list, it's a user message.
+                    self.progress.emit(msg)
+
+                elif type(msg) == list:
+                    # The last yielded element is a list of tuples containing
+                    # the name and ID for every albumless media item.
+                    media_info = msg
+
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            print("type of the trace back:\n", type(traceback.format_exc()),
+                  "\n", traceback.format_exc(), "\ndone.")
+            self.error.emit((traceback.format_exc()))
+            #self.error.emit((exctype, value, traceback.format_exc()))
+            # Handle errors.
+
+        else:
+            self.result.emit(media_info)
+
+        finally:
+            self.finished.emit(True)
+            # Done.
+
+
+class Worker_add_media_batchless(QThread):
+    # Use threads to don't lock up the UI while add items to album all at once.
+
+    status = pyqtSignal(str)    # User message signal.
+    help_str = pyqtSignal(str)  # Help step signal.
+    finished = pyqtSignal(bool) # Finished signal.
+    result = pyqtSignal(list)   # Result signal.
+    error = pyqtSignal(object)   # Error signal.
+    fail = pyqtSignal(list)     # Fail Signal.
+
+    def __init__(self, url_list, nex_button):
+        super(Worker_add_media_batchless, self).__init__()
+        #self.driver = driver
+        self.url_list = url_list
+        self.next_button = nex_button
+        self.album_id = ""
+        self.url_fail = []
+        # List of urls failed to add to album, and the cause.
+
+
+    @pyqtSlot()
+    def run(self):
+        self.driver = driver_init()
+        # Start the chrome driver.
+
+        goto_albums(self.driver)
+        # Open albums list.
+
+        next_button.clicked.disconnect()
+        next_button.clicked.connect(self.album_selected)
+        # Repurpuse the button for album confirmation
+
+    def album_selected(self):
+        album_id_status = goto_albums(driver)
+        # Make the user login & select/create an album.
+
+        if album_id_status[0] is False:
+            # Not a google photos album.
+
+            error_shit(error = album_id_status[1])
+
+            try: self.driver.quit()
+            except NameError: pass
+            # Close the driver if still opened.
+
+            return None
+
+        else:
+            self.album_id = album_id_status[1]
+
+        self.status.emit("Status:\n\tAlbum selected.")
+        self.add_all()
+        # Add all media to the album.
+
+
+
+    def add_all(self):
+        self.status.emit("Status:\n\tWeb bot running.")
+        self.help_str.emit(get_listing_help(2))
+        # Add to album, info for user.
+
+        for media_url in self.url_list[1::]:
+            # Step throught the url list.
+            self.status.emit(f"Status:\n\tNow adding media url:\n\t"
+                             "{media_url}\n\t"
+                             "to the bulk album.")
+
+            add_to_album_status = add_to_album(self.driver,
+                                               self.album_id,
+                                               self.media_url,)
+
+            if add_to_album_status is not True:
+                # Smth went wrong :/
+                status_text = ("Status: /!\\ ERROR /!\\\n\t"
+                               f"Failed to adding media url:\n\t"
+                               "{media_url}\n\t"
+                               "to the bulk album.\nCause:\n" +
+                               add_to_album_status)
+
+                self.status.emit(status_text)
+                # User informed of fail.
+
+                self.url_fail.append((media_url, add_to_album_status))
+                # Keep fails.
+
+
+        self.fail.emit(self.url_fail)
+        # Media items not added to album.
+
+        self.finished.emit(True)
+        # Done.
+
+        try: self.driver.quit()
+        except NameError: pass
+        # Close the driver if still opened.
+
+##                album_init_status = album_init(driver, self.url_list[1])
+##                # Use the 1st media item to init the album.
+##
+##                if album_init_status is not True:
+##                    # Smth went wrong :/
+##                    self.status.emit("Status: /!\\ ERROR /!\\\n\t" +
+##                                     album_init_status)
+##                    error_shit(album_ini_status)
+##                    self.finished.emit(False)
+##                    return None
+
+##                while next_button.isDisabled():
+##                    print("dodo")
+##                    sleep(0.1)
+##                    print("not dodo")
+##                    # Wait for user to press next.
+
+##                self.status.emit("Status:\n\tWeb bot running.")
+##                self.help_str.emit(get_listing_help(2))
+##                # Add to album, info for user.
+##
+##                for media_url in self.url_list[1::]:
+##                    # Step throught the url list.
+##                    self.status.emit(f"Status:\n\tNow adding media url:\n\t"
+##                                     "{media_url}\n\t"
+##                                     "to the bulk album.")
+##                    add_to_album_status = add_to_album(driver, media_url)
+##
+##                    if add_to_album_status is not True:
+##                        # Smth went wrong :/
+##                        status_text = ("Status: /!\\ ERROR /!\\\n\t"
+##                                       f"Failed to adding media url:\n\t"
+##                                       "{media_url}\n\t"
+##                                       "to the bulk album.\nCause:\n"
+##                                       )#add_to_album_status)
+##                        self.status.emit(status_text)
+##                        # User informed of fail.
+##                        url_fail.append((media_url, add_to_album_status))
+##                        # Keep fail.
+
+        except:
+            traceback.print_exc()
+            # Print error.
+
+            exctype, value = sys.exc_info()[:2]
+            self.error.emit((exctype, value, traceback.format_exc()))
+            # Emit error error message box.
+
+            
+
+
     
-    msg.critical(parent, "Error :/", "An error has occured :\n" + str(error))
 
-# -------------------------------------------------- INITIATE SELECTION SECTION
+
+"""
+    def add_to_album_batchless(self):
+        links = [f"https://photos.google.com/lr/photo/" + i[1]
+                 for i in self.media_info]
+        #Get list of URLs.
+
+        self.Listing["Help"].setText(get_listing_help(1))
+        self.Listing["AddToAlbum"].setText("Next >")
+        self.repaint() # It's dirty, I know, -_-
+
+        with driver_init() as driver:
+            # Initiate the chromium driver.
+            # "with" automaticaly closes the driver if an error is thrown.
+
+            album_init_status = album_init(driver, links[0])
+            # Ask user to login & create/select the bulk album.
+
+            print("ASK USER TO NOT COMPLETELY SQUISH THE WINDOW WHE RESIZING IT")
+
+            while not self.Listing["AddToAlbum"].isDown():
+                sleep(0.1)
+                repaint() # It's dirty, I know, -_-
+                self.processEvents()
+            #input("Press enter when the album is created/selected (detect it!).")
+            print("Next!")
+
+            if album_init_status is not True:
+                # If the album couldn't be initiated.
+                self.add_to_album_error(album_init_status)
+                return album_init_status
+
+            for link in links[1::]:
+                # Ignore the 1st link, added by user.
+                add_to_album_status = add_to_album(driver, link)
+
+                if add_to_album_status is not True:
+                    # If the media item couldn't be added to the album.
+                    self.add_to_album_error(add_to_album_status)
+                    return add_to_album_status
+
+        # Everything went well.
+        return True
+"""
+
+
+
+# --------------------------------------------- INITIATE SELECTION SECTION -- #
 def init_selection():
     # Set up selection section & it's layout.
 
@@ -212,36 +368,36 @@ def init_selection():
         "Help" : QLabel()
         }
 
-    # Section title setup.
     selection["Title"].setText("1) Select the Google Photos remote.")
     selection["Title"].setFont(QFont("Arial", 20))
+    # Section title setup.
 
-    # Only the program can add remotes names.
     selection["ComboBox"].setEditable(False)
+    # Only the program can add remotes names.
 
-    # Refresh button when rClone config is changed.
     selection["Refresh"].setText("Refresh")
+    # Refresh button when rClone config is changed.
 
-    # Add Help section.
     selection["Help"].setText("Add helpful text here.")
     selection["Help"].setWordWrap(False)
     selection["Help"].setTextInteractionFlags(
         Qt.TextInteractionFlag.TextSelectableByMouse)
+    # Add Help section.
 
-    # ComboBox/Refresh button layout.
     combo_layout = QHBoxLayout()
     combo_layout.addWidget(selection["ComboBox"], stretch = 2)
     combo_layout.addWidget(selection["Refresh"], stretch = 1)
+    # ComboBox/Refresh button layout.
 
-    # Selection section layout.
     selection_layout = QVBoxLayout()
     selection_layout.addWidget(selection["Title"], stretch = 1)
     selection_layout.addLayout(combo_layout, stretch = 1)
     selection_layout.addWidget(selection["Help"], stretch = 4)
+    # Selection section layout.
 
     return selection, selection_layout
 
-# ----------------------------------------------------- INITIATE SEARCH SECTION
+# ------------------------------------------------ INITIATE SEARCH SECTION -- #
 def init_search():
     # Set up search section & it's layout.
 
@@ -252,31 +408,32 @@ def init_search():
         "Help" : QLabel()
         }
 
-    # Section title setup.
     search["Title"].setText(
         "2) Search for Albumless media in Google Photos.")
     search["Title"].setFont(QFont("Arial", 20))
+    # Section title setup.
 
-    # Status label when searching remote.
     search["Status"].setText("Status: None")
+    # Status label when searching remote.
 
-    # Add Help section.
     search["Help"].setText("Add helpful text here.")
     search["Help"].setWordWrap(False)
     search["Help"].setTextInteractionFlags(
         Qt.TextInteractionFlag.TextSelectableByMouse)
+    # Add Help section.
 
-    # Search section layout.
     search_layout = QVBoxLayout()
     search_layout.addWidget(search["Title"], stretch = 1)
     search_layout.addWidget(search["Status"], stretch = 1)
     search_layout.addWidget(search["Search"], stretch = 1)
     search_layout.addWidget(search["Help"], stretch = 4)
+    # Search section layout.
 
     return search, search_layout
 
-# ---------------------------------------------------- INITIATE LISTING SECTION
+# ----------------------------------------------- INITIATE LISTING SECTION -- #
 def init_listing():
+    # Set up listing (add to album) section & it's layout.
 
     listing = {
         "Title" : QLabel(),
@@ -286,117 +443,144 @@ def init_listing():
         "Name" : QListWidget(),
         "Link" : QListWidget(),
         "AddToAlbum" : QPushButton(),
+        "Is_batch" : QCheckBox(),
+        "Batch_size" : QSpinBox(),
+        "Continue" : QPushButton(),
         "Status" : QLabel(),
         "Help": QLabel()
         }
 
-    # Section title setup.
     listing["Title"].setText("3) Add albumless media items in an album")
     listing["Title"].setFont(QFont("Arial", 20))
+    # Section title setup.
 
-    # Stats about found albumless media (amount, dup names...)
     listing["Info"].setText("Info:\n\tNone")
+    # Stats about found albumless media (amount, dup names...)
 
-    # Add a fixed label for each list.
     listing["Name_label"].setText("Media name:")
     listing["Link_label"].setText("Google Photos media url:")
+    # Add a fixed label for each list.
 
-    # Sync up the two lists selections.
     listing["Name"].currentRowChanged.connect(listing["Link"].setCurrentRow)
     listing["Link"].currentRowChanged.connect(listing["Name"].setCurrentRow)
+    # Sync up the two lists selections.
 
-    # Get the lists' scroll bars.
     vs_name = listing["Name"].verticalScrollBar()
     vs_link = listing["Link"].verticalScrollBar()
-
-    # Sync up the two lists scrolls.
+    # Get the lists' scroll bars
     vs_name.valueChanged.connect(vs_link.setValue)
     vs_link.valueChanged.connect(vs_name.setValue)
+    # Sync up the two lists scrolls.
 
+    listing["AddToAlbum"].setText("Add albumless items to a bulk album.")
     # Use the selenium web bot to add media items to an album.
-    # The button will be enabled when media items will found.
-    listing["AddToAlbum"].setText("Open the Web Bot Controller")
     listing["AddToAlbum"].setEnabled(False)
+    # The button will be enabled when media items will found.
 
-    # Add status section.
-    listing["Status"].setText("Status:\n\tNone")
-    listing["Status"].setTextInteractionFlags(
-        Qt.TextInteractionFlag.TextSelectableByMouse)
+    listing["Is_batch"].setText("(/!\\ Feature not implemented /!\\) "
+                                "Add to album in batches of:")
+    # Add media to album in batches.
+    listing["Is_batch"].setEnabled(False)
+    # Disabling the feature cuz it isn't ready.
 
-    # Add Help section.
+    listing["Is_batch"].stateChanged.connect(
+        listing["Batch_size"].setEnabled)
+    listing["Is_batch"].stateChanged.connect(
+        listing["Continue"].setEnabled)
+
+    listing["Batch_size"].setSingleStep(100)
+    listing["Batch_size"].setEnabled(listing["Is_batch"].isChecked())
+    listing["Batch_size"].setMinimum(0)
+    listing["Batch_size"].setMaximum(1000000000)
+    listing["Batch_size"].setValue(100)
+    # Use batch size if batches are used.
+
+    listing["Continue"].setText("Process next batch >")
+    listing["Continue"].setEnabled(listing["Is_batch"].isChecked())
+    # Process the next batch of media items.
+
+    nameList_layout = QVBoxLayout()
+    nameList_layout.addWidget(listing["Name_label"])
+    nameList_layout.addWidget(listing["Name"])
+    # Names list layout.
+
+    print("TODO: listing Status setup (add as selectable (link))")
+
     listing["Help"].setText("Add helpful text here.")
     listing["Help"].setWordWrap(True)
     listing["Help"].setTextInteractionFlags(
         Qt.TextInteractionFlag.TextSelectableByMouse)
+    # Add Help section.
 
-    # Names list layout.
-    nameList_layout = QVBoxLayout()
-    nameList_layout.addWidget(listing["Name_label"])
-    nameList_layout.addWidget(listing["Name"])
-
-    # Links/URLs list layout.
     linkList_layout = QVBoxLayout()
     linkList_layout.addWidget(listing["Link_label"])
     linkList_layout.addWidget(listing["Link"])
+    # Links/URLs list layout.
 
-    # Both lists layout.
     lists_layout = QHBoxLayout()
     lists_layout.addLayout(nameList_layout, stretch = 3)
     lists_layout.addLayout(linkList_layout, stretch = 4)
+    # Both lists layout.
 
-    # Final layout.
+    batches_layout = QHBoxLayout()
+    batches_layout.addWidget(listing["Is_batch"])
+    batches_layout.addWidget(listing["Batch_size"])
+    # Batches layout.
+
     listing_layout = QVBoxLayout()
     listing_layout.addWidget(listing["Title"], stretch = 1)
     listing_layout.addWidget(listing["Info"], stretch = 1)
-    listing_layout.addLayout(lists_layout, stretch = 400) # list takes all.
+    listing_layout.addLayout(lists_layout, stretch = 40)
     listing_layout.addWidget(listing["AddToAlbum"], stretch = 1)
-    listing_layout.addWidget(listing["Status"], stretch = 1)
+    listing_layout.addLayout(batches_layout, stretch = 1)
+    listing_layout.addWidget(listing["Continue"], stretch = 1)
     listing_layout.addWidget(listing["Help"], stretch = 1)
 
     return listing, listing_layout
 
-# ------------------------------------------------------ TEXT IN SELECTION HELP
+# ------------------------------------------------- TEXT IN SELECTION HELP -- #
 def get_selection_help():
+    # Return the text for the help in the selection section.
 
-    # If rClone is not in the folder nor installed.
     if not rclone.is_installed():
+        # If rClone is not in the folder nor installed.
         text = ("\n/!\\ WARNING:\n"
                 "The rClone executable wasn't found in this executable's "
                 "directory nor in the %PATH% env variable:"
                 "\n1) Download rClone from:\n\n"
-                    "\thttps://rclone.org/downloads/#release\n\n"
-                "2) Extract \"rclone.exe\" from the archive and place it "
+                    "\thttps://rClone.org/downloads/#release\n\n"
+                "2) Extract \"rClone.exe\" from the archive and place it "
                 "same folder:\n\n"
                     f"\t{os.getcwd()}\n\n"
                 "3) Comme back and hit Refresh.\n"
                 "\n------------------------------\n"
-                "Docs: https://rclone.org/install/#quickstart")
+                "Docs: https://rClone.org/install/#quickstart")
         return text
 
 
-    # If rClone has no remote(s).
     elif rclone.get_remotes() == []:
+        # If rClone has no remote(s).
         header = "\nHELP:\nIf you haven't created your remote:\n"
-
-    # If rClone has remote(s).
     else:
+        # If rClone has remote(s).
         header = "\nHELP:\nTo create a new remote:\n"
 
 
-    # rClone new remote instruction.
     body = ("1) Open your CMD and go to this executable's directory:\n"
                 f"\n\tcd {os.getcwd()}\n\n"
             "2) Create a new remote by typing:\n\n"
-                "\trclone config\n\n"
+                "\trClone config\n\n"
             "3) Follow the instructions to create a new google photo remote.\n"
             "4) Comme back and hit Refresh.\n"
             "\n------------------------------\n"
             "Docs: https://rClone.org/googlephotos/")
+    # rClone new remote instruction.
 
-    return header + body
+    return header+body
 
-# --------------------------------------------------------- TEXT IN SEARCH HELP
+# ---------------------------------------------------- TEXT IN SEARCH HELP -- #
 def get_search_help(remote_name):
+    # Return the text for the help in the serch section.
 
     text = ("Searching takes a while, if the app doesn't respond, wait a "
             "bit and don't spam the button !\n\n\n"
@@ -407,25 +591,36 @@ def get_search_help(remote_name):
             "1) Open your CMD and go to this executable's directory:\n\n"
                 f"\tcd {os.getcwd()}\n\n"
             "2) Run:\n\n"
-                f"\trclone lsd {remote_name}album\n\n"
+                f"\trClone lsd {remote_name}album\n\n"
             "- If the token isn't expired you will see a list of your albums."
             "\n- If the token is expired you will recive a message saying so:"
             " Follow the instructions to recive a new token.")
     return text
 
 
-def get_listing_help():
+def get_listing_help(step):
     # Help the user walk through.
     # Step 0: Driver initialisation, explain.
     # Step 1: Login Google Photo & select/create the bulk album.
     # Step 2: Instructions: Don't close the app & driver & don't resize driver.
+    text = "HELP:\n"
 
-    text = ("HELP:\n"
-            "Due to limitations of the Google photos API , a web bot is "
-            "needed to to loop over every link and add the media to the album "
-            "like a regular user."
+    if step == 0:
+        text += ("Due to limitations of the Google photos API , a web bot is "
+                 "needed to to loop over every link and add the media to the "
+                 "album like a regular user.")
 
-            "\n\nIMPORTANT:\n" +
+    elif step == 1:
+        text += ("In the chrome brwoser that opened up, log into your google "
+                 "account.\n"
+                 "Then, from the \"add to album\" menu popup, select/create "
+                 "the album in which all the albumless media items will be "
+                 "added.\n"
+                 "Once finished press the \"Next >\" button.")
+    elif step == 2:
+        text += ("The web bot is now running.")
+
+    text += ("\n\nIMPORTANT:\n" +
             "-" * 116 + "\n"
             "/!\\\nWhile the web bot is running don't:\n"
             "- Click anywhere on the webpage.\n"
@@ -438,27 +633,38 @@ def get_listing_help():
             "- Hide the browser window with other apps and windows, letting "
             "it run in the background.\n"
             "/!\\\n" +
-            "-" * 116
-            )
+            "-" * 116)
+
     return text
 
+# ---------------------------------------------- ADD WIDGET TO QLISTWIDGET -- #
+def add_widget_to_list(QList, widget):
+    # Add widgets to QListWidget:
+    # https://stackoverflow.com/a/26199829
 
-# ========================================================== MAIN WINDOW ==== #
+    listItem = QListWidgetItem()
+    # Create an item for QListWidget.
+    QList.addItem(listItem)
+    # Add the QList item.
+    QList.setItemWidget(listItem, widget)
+    # Set the QList item to the widget.
+
+
+
+# ============================================================ MAIN WINDOW == #
 class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
         # Qt class subclassed, super __init__ call required.
 
-        print("GP Albumless tracker app Initiating...")
-
-        # Set the appropriate taskbar icon depending on the theme.
-        self.icon_path = get_icon_path(self)
-        self.setWindowIcon(QIcon(self.icon_path))
-
         # Window setup.
         window_title = "Google Photos - Albumless media tracker"
         self.setWindowTitle(window_title)
+
+        self.threadpool = QThreadPool()
+        print("Multithreading with maximum %d threads" % self.threadpool.maxThreadCount())
+        # Setup a threadpool to not lock up the UI.
 
         # Name of the currently selected remote.
         self.remote = ""
@@ -484,7 +690,7 @@ class MainWindow(QMainWindow):
         self.Listing, listing_layout = init_listing()
 
         self.Listing["AddToAlbum"].clicked.connect(self.add_to_album_batchless)
-        self.Listing["Help"].setText(get_listing_help())
+        self.Listing["Help"].setText(get_listing_help(0))
 
 
         # Add the "select remote" tab.
@@ -508,32 +714,35 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
     # ============================================ MAIN WINDOW FUNCTIONS ==== #
-    # ---------------------------------------------------- CHECK FOR RCLONE
+    # ------------------------------------------------- CHECK FOR RCLONE ---- #
     def rclone_status(self):
+        # Check if the rClone executable is availble.
 
-        # rClone here, nothing to do.
         if rclone.is_installed():
+            # rClone here, nothing to do.
             self.unlock_ui()
             return True
 
         # rClone not availble, lock all.
         self.tabs.setCurrentIndex(0) # Go to 1st tab.
-        self.lock_ui((0,)) # Keep tab 1 unlocked.
-        error_shit("The rcClone executable couldn't be found and/or used.", self)
+        self.lock_ui()
+        error_shit("The rclone executable couldn't be found or used.", self)
         return False
 
-    # ------------------------------------------ CHECK FOR GOOD REMOTE NAME
+    # --------------------------------------- CHECK FOR GOOD REMOTE NAME ---- #
     def remote_status(self):
+        # Check if it is all good for rClones calls.
 
         # rClone not availble, lock all.
         rclone_here = self.rclone_status()
         if not rclone_here:
+            # Info for user.
             return False
 
         # No remotes, lock all.
         if self.remote == "":
             self.tabs.setCurrentIndex(0) # Go to 1st tab.
-            self.lock_ui((0,)) # Keep tab 1 unlocked.
+            self.lock_ui()
             error_shit("You have no remotes.", self)
             return False
 
@@ -542,75 +751,65 @@ class MainWindow(QMainWindow):
         self.Search["Search"].setEnabled(True)
         return True
 
-    # ------------------------------------------- UPDATE THE CURRENT REMOTE
+    # ---------------------------------------- UPDATE THE CURRENT REMOTE ---- #
     def update_remote(self, remote_name):
-
-        # Change remote
         self.remote = remote_name
+        # Change remote
 
-        print(f"Current remote updated: \"{self.remote}\"")
-
-        # Verify rClone and remote name
         self.remote_status()
+        # Verify rClone and remote name
 
-        # Update the Search button text (removed the trailing colon).
         self.Search["Search"].setText(
-            "Search for albumless media in " + self.remote[:-1] + " >")
-
-        # Update the "Search" help section.
+            "Search for albumless media in " + self.remote[:-1])
+        # Update the Search button text (removed the trailing colon).
         self.Search["Help"].setText(get_search_help(self.remote))
+        # Update the "Search" help section.
 
-    # -------------------------------------------- UPDATE THEE REMOTES LIST
+    # ----------------------------------------- UPDATE THEE REMOTES LIST ---- #
     def refresh(self):
-
-        print("Refreshing the available remotes...")
-
-        # Keep remote selected if it is in the new list.
+        
         def combobox_update(items):
-            old_remote = self.remote
-            # Fill the combobox.
-            self.Selection["ComboBox"].addItems(items)
-            # Get new index of previous remote name (-1 if not found).
-            index = self.Selection["ComboBox"].findText(old_remote)
-            # If index was found (>-1) and is selectable.
-            if -1 < index < self.Selection["ComboBox"].count():
-                # Go to previous old_remote's index.
-                self.Selection["ComboBox"].setCurrentIndex(index)
+            remote = self.remote
+            # Keep remote name.
 
-        # Avoid UI updates while clearing.
+            self.Selection["ComboBox"].addItems(items)
+            # Fill the combobox.
+
+            index = self.Selection["ComboBox"].findText(remote)
+            # Get new index of previous remote name (-1 if not found).
+            if -1 < index < self.Selection["ComboBox"].count():
+                # If index was found (>-1) and is selectable.
+                self.Selection["ComboBox"].setCurrentIndex(index)
+                # Go to previous remote's index.
+
         self.Selection["ComboBox"].blockSignals(True)
         self.Selection["ComboBox"].clear()
         self.Selection["ComboBox"].blockSignals(False)
+        # Avoid UI updates while clearing.
 
-        # Update the "Selection" help section.
         self.Selection["Help"].setText(get_selection_help())
+        # Update the "Selection" help section.
+
+        remote_here = self.rclone_status()
 
         # Stop the refresh if rClone not availble.
-        remote_here = self.rclone_status()
         if not remote_here:
             return None
 
-        # Init worker & thread
-        self.refresh_thread = QThread()
-        self.refresh_worker = Worker_get_remotes()
-        self.refresh_worker.moveToThread(self.refresh_thread)
-        self.refresh_thread.started.connect(self.refresh_worker.run)
+        self.refresh_thread = Worker_get_remotes()
+        # Thread to not lock up the UI.
 
-        # Destroy worker & thread
-        self.refresh_worker.finished.connect(self.refresh_worker.close)
-        self.refresh_worker.finished.connect(self.refresh_thread.quit)
-
+        self.refresh_thread.result.connect(combobox_update)
+        self.refresh_thread.error.connect(error_shit)
         # Handle results & errors.
-        self.refresh_worker.result.connect(combobox_update)
-        self.refresh_worker.error.connect(error_shit)
-
+            
         self.refresh_thread.start()
         # Get remotes
 
-    # ------------------------------------ SEARCH FOR ALBUMLESS MEDIA ITEMS
+    # --------------------------------- SEARCH FOR ALBUMLESS MEDIA ITEMS ---- #
     def search_media(self):
 
-        print("Searching for Albumless media items in remote...")
+        print("searching")
 
         if not rclone.is_installed(): # If rClone is un avalaible
             self.refresh() # Refresh and
@@ -633,33 +832,24 @@ class MainWindow(QMainWindow):
             # Fill the lists for the name & url for each albumless items.
             self.unlock_ui()
 
-        # Init worker & thread.
-        self.search_thread = QThread()
-        self.search_worker = Worker_search(self.remote)
-        self.search_worker.moveToThread(self.search_thread)
-        self.search_thread.started.connect(self.search_worker.run)
+        self.search_thread = Worker_search(self.remote)
 
-        # Destroy worker & thread.
-        self.search_worker.finished.connect(self.search_worker.deleteLater)
-        self.search_worker.finished.connect(self.search_thread.quit)
-
-        #Handle worker's events.
-        self.search_worker.progress.connect(progress_message)
-        self.search_worker.result.connect(media_info_fetched)
-        self.search_worker.finished.connect(
-            lambda: self.unlock_ui())
-        self.search_worker.error.connect(self.unlock_ui)
-        self.search_worker.error.connect(self.refresh)
-        self.search_worker.error.connect(error_shit)
+        self.search_thread.progress.connect(progress_message)
+        self.search_thread.result.connect(media_info_fetched)
+        self.search_thread.error.connect(error_shit)
+        self.search_thread.error.connect(self.unlock_ui)
+        self.search_thread.error.connect(self.refresh)
 
         self.search_thread.start()
 
         self.lock_ui()
+        self.tabs.setTabEnabled(1, False)
         # Disable all to avoid button spam.
 
-    # -------------------------------------------- SHOW USER ALBULESS MEDIA
+    # ----------------------------------------- SHOW USER ALBULESS MEDIA ---- #
     def repopulate_listing(self, media_info):
         # Put the names & links of the media items in the lists of tab 3.
+        print("TODO: extract 'repopulate_listing' func from the class.")
 
         self.media_info = media_info
 
@@ -677,13 +867,13 @@ class MainWindow(QMainWindow):
             ID = i[1]
             url = f"https://photos.google.com/lr/photo/{ID}"
 
-            # ----------------------------------- DUPPED ITEM NAMES
+            # -------------------------------- DUPPED ITEM NAMES ------------ #
             dupe_count += 1 if f"{{{ID}}}" in name else 0
             # Acount for dupped names of items.
             name = name.replace(f"{{{ID}}}", "") # WTF, 3 curly brackets !?
             # Remove ID in name for items w/ dupped names.
 
-            # ---------------------------------------- NAMES COLUMN
+            # ------------------------------------- NAMES COLUMN ------------ #
             names_label = QLabel(name)
             # Get the name
             names_label.setTextInteractionFlags(
@@ -692,7 +882,7 @@ class MainWindow(QMainWindow):
             add_widget_to_list(self.Listing["Name"], names_label)
             # Add the name to the list.
 
-            # ----------------------------------------- URLs COLUMN
+            # -------------------------------------- URLs COLUMN ------------ #
             urls_label = QLabel(url)
             # Get the google photos url.
             urls_label.setOpenExternalLinks(True)
@@ -705,7 +895,7 @@ class MainWindow(QMainWindow):
             self.Listing["Link"].sizeHintForColumn(0))
         # Fit the links list to it's content.
 
-        # --------------------------------------------- UPDATE INFO BOX
+        # ------------------------------------------ UPDATE INFO BOX -------- #
         self.Listing["Info"].setText("Info:\n\t"
                                      "Albumless media items count: "
                                      f"{total_count}\n\t"
@@ -717,56 +907,53 @@ class MainWindow(QMainWindow):
             self.Listing["AddToAlbum"].setEnabled(True)
             # Activate "add to album" button.
 
-        else:
-            # If there arn't albumless media items.
-            self.Listing["AddToAlbum"].setEnabled(False)
-            error_shit(error="No albumless media items were found.")
 
-
-    # ------------------------------------------------------- START WEB BOT
     def add_to_album_batchless(self):
+        print("TODO: UI lock & unlock (add to album)")
 
-        print("Starting the Web Bot Controller...")
+        def add_to_album_done():
+            print("reconect self.Listing['AddToAlbum'] the add to album func.")
 
-        self.Listing["AddToAlbum"].setEnabled(False)
+        links = [f"https://photos.google.com/lr/photo/" + i[1]
+                 for i in self.media_info]
+        #Get list of URLs.
 
-        # List of URLs from IDs.
-        media_id = [i[1] for i in self.media_info]
+        self.Listing["Help"].setText(get_listing_help(1))
+        self.Listing["AddToAlbum"].setText("Next >")
+        self.repaint() # It's dirty, I know, -_-
 
-        # Open the web bot.
-        self.add_media_worker = web_bot_controller(
-            parent=self, media_IDs=media_id, icon_path=self.icon_path)
+        self.add_media_thread = Worker_add_media_batchless(
+            links,
+            nex_button = self.Listing["AddToAlbum"]
+            )
 
-        self.add_media_worker.show()
+        self.add_media_thread.help_str.connect(
+            self.Listing["Help"].setText)
+        self.add_media_thread.finished.connect(add_to_album_done)
+        # Help section update.
+        #self.add_media_thread.status.connect()
+        # Keep user informed of status.
+        #self.add_media_thread.fail.connect()
+        # Show user failed add to album media items.
+        self.add_media_thread.error.connect(error_shit)
 
-        self.add_media_worker.finished.connect(
-            self.add_media_worker.close)
+        self.add_media_thread.start()
 
-
-        # Handle web bot controller events.
-        self.add_media_worker.finished.connect(
-            lambda: self.Listing["AddToAlbum"].setEnabled(True))
-        self.add_media_worker.error.connect(error_shit)
-
-        def display_failed_url(fail=[]):
-            self.fail_window = web_bot_fail(fail, self)
-            self.fail_window.show()
-        self.add_media_worker.failed.connect(display_failed_url)
-
-    # --------------------------------------------------------- LOCK THE UI
-    def lock_ui(self, whitelist=()):
+    # ------------------------------------------------------ LOCK THE UI ---- #
+    def lock_ui(self, *args):
         current_tab = self.tabs.currentIndex()
         # Get the current tab index
 
         for i in range(self.tabs.count()):
-            if i not in whitelist:
+            if i != current_tab:
                 self.tabs.setTabEnabled(i, False)
+                print("locked tab:", i)
         # Disable all the tabs except the current one.
 
         self.tabs.setCurrentIndex(current_tab)
         # Go back 
 
-    # ------------------------------------------------------- UNLOCK THE UI
+    # ---------------------------------------------------- UNLOCK THE UI ---- #
     def unlock_ui(self, *args):
         current_tab = self.tabs.currentIndex()
         # Get the current tab index
@@ -776,52 +963,16 @@ class MainWindow(QMainWindow):
         # Enable all the tabs
 
         self.tabs.setCurrentIndex(current_tab)
-        # Go back
+        # Go back 
+        
 
 
-    def closeEvent(self, event):
-
-        # --------------------------------------------- KILL REFRESH WORKER
-        try:
-            self.refresh_worker.close()
-        except (RuntimeError, AttributeError) as error:
-            # Refresh worker not yet created or already deleted.
-            pass
-
-        try:
-            self.refresh_thread.quit()
-            self.refresh_thread.wait()
-        except AttributeError as error:
-            # Refresh thread not yet created.
-            pass
-
-        # ---------------------------------------------- KILL SEARCH WORKER
-        try:
-            self.search_worker.close()
-        except (RuntimeError, AttributeError) as error:
-            # Refresh worker not yet created or already deleted.
-            pass
-
-        try:
-            self.search_thread.quit()
-            self.search_thread.wait()
-        except AttributeError as error:
-            # Refresh thread not yet created.
-            pass
-
-        # ---------------------------------------- KILL ADD TO ALBUM WORKER
-        #                                                         (Web Bot)
-        try:
-            self.add_media_worker.close()
-        # Web bot controller not yet created.
-        except AttributeError as error:
-            pass
-
-        # Inherit QMainWindow closing event.
-        super(MainWindow, self).closeEvent(event)
 
 
-# =========================================================================== #
+
+
+#=============================================================================#
+
 if __name__ == "__main__":
     
     app = QApplication(sys.argv)
@@ -830,3 +981,47 @@ if __name__ == "__main__":
     window.show()
 
     app.exec()
+
+
+
+
+
+
+
+##    # ----------------------------------------- UPDATE THEE REMOTES LIST ---- #
+##    def refresh(self):
+##        #======= Update tab 1 (selection) =======#
+##        self.Selection["ComboBox"].clear()
+##
+##        if rclone.is_installed():
+##            self.Selection["ComboBox"].addItems(rclone.get_remotes())
+##        # Update list of remotes if rClone is installed.
+##
+##        self.Selection["Help"].setText(get_selection_help())
+##        # Update the help section.
+##
+##        #======== Update tab 2 (search) =========#
+##        self.Search["Search"].setText(
+##            "Search for albumless media in " + self.remote[:-1])
+##        # Update the Search button text (removed the trailing colon).
+##
+##        self.Search["Help"].setText(get_search_help(self.remote))
+##        # Update the help section.
+##
+##        #=============== Lock UI ================#
+##        if self.remote =="" or (not rclone.is_installed()):
+##            # If no remotes are found or if rClone is unavalaible.
+##
+##            for i in range(1, self.tabs.count()):
+##                self.tabs.setTabEnabled(i, False)
+##            # Disable all the tabs except the 1st.
+##
+##
+##        else: # If rClone is avalaible.
+##
+##            for i in range(1, self.tabs.count()):
+##                self.tabs.setTabEnabled(i, True)
+##            # Enable all the tabs
+##
+##            self.tabs.setCurrentIndex(0)
+##            # Go to the 1st tab.
