@@ -1,4 +1,7 @@
-# What is Google Photos Albumless Tracker (GPAT) ?
+# This tool is now a CLI !
+You can find an improved version of this GUI: [GP-albumless-tracker](https://github.com/abppbd/GP-albumless-tracker#readme)
+
+# What is Google Photos Albumless Tracker ?
 With [Google Photos (GP)](https://photos.google.com/) you can create albums to organize your media items (photos, videos...). But you can't easily find the unorganized ones mindlessly floating in your Google Photos aether !
 
 _Google Photos Albumless Tracker_ is a GUI based app that finds albumless media, and adds them to a "needs triage" album with a web bot.
